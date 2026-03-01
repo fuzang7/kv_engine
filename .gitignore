@@ -1,0 +1,33 @@
+# ==============================================
+# C++ 构建产物
+# ==============================================
+# 编译生成的对象文件
+*.o
+*.obj
+*.d
+
+# 静态库
+*.a
+*.lib
+
+# 动态库
+*.so
+*.so.*
+*.dll
+*.dylib
+
+# 可执行文件（无后缀名或 .exe）
+benchmark_main
+test
+main
+*.exe
+*.out
+*.app
+
+main.bin
+test.bin
+main.cpp
+# VSCode
+.vscode/
+*.code-workspace
+
