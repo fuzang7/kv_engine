@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -Werror -march=native
+CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -Werror -luring -march=native
 LDFLAGS = 
 
 # 源文件和目标文件
