@@ -9,7 +9,6 @@
 
 class AsyncIOEngine {
 private:
-
     enum class IOOperation {
         Read,
         Write
@@ -120,10 +119,25 @@ public:
         ctx->size = size;
         ctx->offset = offset;
         ctx->bytes_completed = 0;
+        ctx->pool_index = idx;
 
         io_uring_prep_write(sqe, fd, ptr, size, offset);
         io_uring_sqe_set_data(sqe, ctx);
 
+        return true;
+    }
+
+    bool resubmit_context(IOContext* ctx) {
+        struct io_uring_sqe *sqe = io_uring_get_sqe(&ring_);
+        if (!sqe) {
+            io_uring_submit(&ring_);
+            sqe = io_uring_get_sqe(&ring_);
+            if (!sqe) {
+                return false;
+            }
+        }
+        io_uring_prep_write(sqe, ctx->fd, ctx->buffer, ctx->size, ctx->offset);
+        io_uring_sqe_set_data(sqe, ctx);
         return true;
     }
     
@@ -135,6 +149,51 @@ public:
         return ret;
     }
 
-    int wait_cqe(struct io_uring_cqe** cqe);
-    void cqe_seen(struct io_uring_cqe* cqe);
+    int reap_completions() {
+        int cnt = 0;
+        struct io_uring_cqe* cqe;
+        
+        while (!io_uring_peek_cqe(&ring_, &cqe)) {
+            IOContext* user_data = (IOContext*) io_uring_cqe_get_data(cqe);
+            int res = cqe->res;
+            if (res > 0) {
+                if (res < user_data->size) {
+                    user_data->buffer = static_cast<char*>(user_data->buffer) + res;
+                    user_data->size -= res;
+                    user_data->offset += res;
+                    if (!resubmit_context(user_data)) {
+                        throw std::runtime_error("Failed to submit context");
+                    }
+                } else {
+                    free_indices_.push(user_data->pool_index);
+                }
+            } else {
+                switch (-res) {
+                    case 0:
+                        fprintf(stdout, "Write 0 bytes (fd=%d)\n", user_data->fd);
+                        free_indices_.push(user_data->pool_index);
+                        break;
+                    case EINVAL:
+                        fprintf(stderr, "EINVAL: Invalid param - fd=%d, offset=%lld, size=%zu\n",
+                                user_data->fd, (long long)user_data->offset, user_data->size);
+                        break;
+                    case EAGAIN:
+                        fprintf(stderr, "EAGAIN: Resource temp unavailable (fd=%d)\n", user_data->fd);
+                        if (!resubmit_context(user_data)) {
+                            throw std::runtime_error("Failed to submit context");
+                        } 
+                        break;
+                    default:
+                        break;
+                }
+            }
+            cqe_seen(cqe);
+            cnt++;
+        }
+        return cnt;
+    }
+
+    void cqe_seen(struct io_uring_cqe* cqe) {
+        io_uring_cqe_seen(&this->ring_, cqe);
+    }
 };
