@@ -26,6 +26,16 @@ int main() {
         return 1;
     }
 
+    void *read_ptr = aligned_allocate(ALIGN_SIZE, BUFFER_SIZE);
+    if (read_ptr == nullptr) {
+        perror("aligned_allocate failed");
+        aligned_free(ptr);
+        aligned_free(read_ptr);
+        close(fd);
+        return -1;
+    }
+    memset(read_ptr, 0, BUFFER_SIZE);
+
     try {
         AsyncIOEngine engine(16, 0);
 
@@ -42,20 +52,39 @@ int main() {
         std::cout << "Submitted " << submitted << " SQE(s) to kernel." << std::endl;
 
         int total_completed = 0;
-        while (total_completed == 0) {
+        while (engine.get_pending_count() > 0) {
             total_completed = engine.reap_completions();
         }
         std::cout << "IO completed. Reaped " << total_completed << " CQE(s)." << std::endl;
 
+        if (!engine.submit_read(read_ptr, ptr, fd, BUFFER_SIZE, 0)) {
+            std::cerr << "Failed to read request" << std::endl;
+            close(fd);
+            unlink(FILE_PATH);
+            aligned_free(ptr);
+            aligned_free(read_ptr);
+            return 1;
+        }
+
+        submitted = engine.submit_sqes();
+        std::cout << "Submitted " << submitted << " SQE(s) to kernel." << std::endl;
+        
+        total_completed = 0;
+        while (engine.get_pending_count() > 0) {
+            total_completed += engine.reap_completions();
+        }
+        std::cout << "IO completed. Reaped " << total_completed << " CQE(s)." << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Engine exception: " << e.what() << std::endl;
         close(fd);
         unlink(FILE_PATH);
         aligned_free(ptr);
+        aligned_free(read_ptr);
         return 1;
     }
-
-    aligned_free(ptr);
+    std::cout << "All data validation passed successfully." << std::endl;
     close(fd);
+    aligned_free(ptr);
+    aligned_free(read_ptr);
     return 0;
 }
